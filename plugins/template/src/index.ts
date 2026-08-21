@@ -17,6 +17,31 @@ export default {
                 "getCurrentUser"
             );
 
+            // Search loaded modules for likely guild-order functions.
+            const candidates = metro.findAll((m: any) => {
+                if (!m || typeof m !== "object") return false;
+
+                return Object.keys(m).some((key) =>
+                    /guild.*(move|position|order|reorder)|move.*guild/i.test(key)
+                );
+            });
+
+            logger.log(
+                `Latest Used Servers: found ${candidates.length} reorder candidates`
+            );
+
+            for (const module of candidates) {
+                const names = Object.keys(module).filter((key) =>
+                    /guild.*(move|position|order|reorder)|move.*guild/i.test(key)
+                );
+
+                if (names.length) {
+                    logger.log(
+                        `Latest Used Servers candidate: ${names.join(", ")}`
+                    );
+                }
+            }
+
             if (!Dispatcher || !UserStore) {
                 logger.error(
                     "Latest Used Servers: required modules not found"
@@ -34,15 +59,11 @@ export default {
 
                 if (!currentUser) return;
 
-                if (message.author?.id !== currentUser.id) {
-                    return;
-                }
+                if (message.author?.id !== currentUser.id) return;
 
                 logger.log(
                     `Latest Used Servers: sent message in ${message.guild_id}`
                 );
-
-                // Native guild-reorder discovery comes next.
             };
 
             Dispatcher.subscribe(
@@ -58,10 +79,6 @@ export default {
                     );
                 } catch {}
             };
-
-            logger.log(
-                "Latest Used Servers: message tracking enabled"
-            );
         } catch (e) {
             logger.error(
                 `Latest Used Servers: ${String(e)}`
@@ -74,8 +91,6 @@ export default {
             unsubscribe();
             unsubscribe = null;
         }
-
-        logger.log("Latest Used Servers unloaded");
     },
 
     settings: Settings,
