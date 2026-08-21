@@ -4,30 +4,29 @@ import Settings from "./Settings";
 
 let patches: (() => void)[] = [];
 
-const getRecent = (): string[] => storage.recentServers ?? [];
+function moveGuildToTop(guildId: string) {
+    try {
+        const actions = metro.findByProps(
+            "moveGuild",
+            "moveGuildToPosition"
+        );
 
-function rememberServer(id: string) {
-    if (!id) return;
+        if (actions?.moveGuildToPosition) {
+            actions.moveGuildToPosition(guildId, 0);
+            logger.log(`Moved guild ${guildId} to top`);
+            return;
+        }
 
-    storage.recentServers = [
-        id,
-        ...getRecent().filter((x) => x !== id),
-    ].slice(0, 100);
-}
+        if (actions?.moveGuild) {
+            actions.moveGuild(guildId, 0);
+            logger.log(`Moved guild ${guildId} to top`);
+            return;
+        }
 
-function sortGuilds(guilds: any[]) {
-    const recent = getRecent();
-
-    return [...guilds].sort((a, b) => {
-        const ai = recent.indexOf(a?.id);
-        const bi = recent.indexOf(b?.id);
-
-        if (ai === -1 && bi === -1) return 0;
-        if (ai === -1) return 1;
-        if (bi === -1) return -1;
-
-        return ai - bi;
-    });
+        logger.log("Latest Used Servers: native reorder action not found");
+    } catch (e) {
+        logger.error(`Latest Used Servers: ${String(e)}`);
+    }
 }
 
 export default {
@@ -35,60 +34,61 @@ export default {
         logger.log("Latest Used Servers loaded");
 
         try {
-            // Track the server you currently select.
-            const navigation = metro.findByProps(
-                "getLastSelectedGuildId"
+            /*
+             * Discord dispatches this when the current user sends
+             * a message. We only react to messages authored by us.
+             */
+            const Dispatcher = metro.findByProps(
+                "dispatch",
+                "subscribe"
             );
 
-            if (navigation) {
-                patches.push(
-                    patcher.after(
-                        navigation,
-                        "getLastSelectedGuildId",
-                        (_args, result) => {
-                            if (result) rememberServer(result);
-                            return result;
-                        }
-                    )
-                );
+            if (!Dispatcher) {
+                logger.error("Latest Used Servers: dispatcher not found");
+                return;
             }
 
-            // Reorder the guild data according to recent usage.
-            const guildStore = metro.findByProps("getGuilds");
+            const handler = (event: any) => {
+                if (!event) return;
 
-            if (guildStore) {
-                patches.push(
-                    patcher.after(
-                        guildStore,
-                        "getGuilds",
-                        (_args, result) => {
-                            if (!result || typeof result !== "object") {
-                                return result;
-                            }
+                const authorId =
+                    event.message?.author?.id ??
+                    event.author?.id;
 
-                            const sorted = sortGuilds(
-                                Object.values(result)
-                            );
+                const currentUser =
+                    metro.findByProps("getCurrentUser")?.getCurrentUser?.();
 
-                            const reordered: Record<string, any> = {};
+                if (!currentUser || authorId !== currentUser.id) {
+                    return;
+                }
 
-                            for (const guild of sorted) {
-                                if (guild?.id) {
-                                    reordered[guild.id] = guild;
-                                }
-                            }
+                const guildId =
+                    event.message?.guild_id ??
+                    event.guildId;
 
-                            return reordered;
-                        }
-                    )
-                );
-            }
+                if (!guildId) return;
 
-            logger.log("Latest Used Servers: tracking enabled");
-        } catch (error) {
-            logger.error(
-                `Latest Used Servers: ${String(error)}`
-            );
+                storage.recentServers = [
+                    guildId,
+                    ...(storage.recentServers ?? []).filter(
+                        (id: string) => id !== guildId
+                    ),
+                ].slice(0, 100);
+
+                moveGuildToTop(guildId);
+            };
+
+            Dispatcher.subscribe("MESSAGE_CREATE", handler);
+
+            patches.push(() => {
+                try {
+                    Dispatcher.unsubscribe("MESSAGE_CREATE", handler);
+                } catch {}
+            });
+
+            logger.log("Latest Used Servers: message tracking enabled");
+        } catch (e) {
+            logger.error(`Latest Used Servers: ${String(e)}`);
         }
     },
 
@@ -100,7 +100,6 @@ export default {
         }
 
         patches = [];
-
         logger.log("Latest Used Servers unloaded");
     },
 
