@@ -4,32 +4,29 @@ import Settings from "./Settings";
 
 let patches: (() => void)[] = [];
 
+const getRecent = (): string[] => storage.recentServers ?? [];
+
 function rememberServer(id: string) {
     if (!id) return;
 
-    const recent = storage.recentServers ?? [];
-
     storage.recentServers = [
         id,
-        ...recent.filter((x: string) => x !== id),
+        ...getRecent().filter((x) => x !== id),
     ].slice(0, 100);
 }
 
-function reorderGuilds(guilds: any[]) {
-    const recent: string[] = storage.recentServers ?? [];
+function sortGuilds(guilds: any[]) {
+    const recent = getRecent();
 
     return [...guilds].sort((a, b) => {
-        const aId = a?.id;
-        const bId = b?.id;
+        const ai = recent.indexOf(a?.id);
+        const bi = recent.indexOf(b?.id);
 
-        const aIndex = recent.indexOf(aId);
-        const bIndex = recent.indexOf(bId);
+        if (ai === -1 && bi === -1) return 0;
+        if (ai === -1) return 1;
+        if (bi === -1) return -1;
 
-        if (aIndex === -1 && bIndex === -1) return 0;
-        if (aIndex === -1) return 1;
-        if (bIndex === -1) return -1;
-
-        return aIndex - bIndex;
+        return ai - bi;
     });
 }
 
@@ -38,66 +35,60 @@ export default {
         logger.log("Latest Used Servers loaded");
 
         try {
-            const NavigationStore = metro.findByProps(
+            // Track the server you currently select.
+            const navigation = metro.findByProps(
                 "getLastSelectedGuildId"
             );
 
-            if (NavigationStore) {
+            if (navigation) {
                 patches.push(
                     patcher.after(
-                        NavigationStore,
+                        navigation,
                         "getLastSelectedGuildId",
                         (_args, result) => {
-                            if (result) {
-                                rememberServer(result);
-                            }
-
+                            if (result) rememberServer(result);
                             return result;
                         }
                     )
                 );
             }
 
-            const GuildStore = metro.findByProps("getGuilds");
+            // Reorder the guild data according to recent usage.
+            const guildStore = metro.findByProps("getGuilds");
 
-            if (!GuildStore) {
-                logger.error("Latest Used Servers: GuildStore not found");
-                return;
-            }
-
-            const originalGetGuilds = GuildStore.getGuilds;
-
-            if (typeof originalGetGuilds === "function") {
+            if (guildStore) {
                 patches.push(
                     patcher.after(
-                        GuildStore,
+                        guildStore,
                         "getGuilds",
                         (_args, result) => {
                             if (!result || typeof result !== "object") {
                                 return result;
                             }
 
-                            const guilds = Object.values(result);
+                            const sorted = sortGuilds(
+                                Object.values(result)
+                            );
 
-                            const sorted = reorderGuilds(guilds);
-
-                            const output: Record<string, any> = {};
+                            const reordered: Record<string, any> = {};
 
                             for (const guild of sorted) {
                                 if (guild?.id) {
-                                    output[guild.id] = guild;
+                                    reordered[guild.id] = guild;
                                 }
                             }
 
-                            return output;
+                            return reordered;
                         }
                     )
                 );
             }
 
-            logger.log("Latest Used Servers: tracking + reordering enabled");
-        } catch (e) {
-            logger.error(`Latest Used Servers: ${String(e)}`);
+            logger.log("Latest Used Servers: tracking enabled");
+        } catch (error) {
+            logger.error(
+                `Latest Used Servers: ${String(error)}`
+            );
         }
     },
 
