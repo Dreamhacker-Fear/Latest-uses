@@ -1,86 +1,95 @@
-import { metro, patcher, logger } from "@vendetta";
+import { React } from "@vendetta/metro/common";
+import { metro, logger } from "@vendetta";
 import { findByName } from "@vendetta/metro/common";
+import { Forms } from "@vendetta/ui/components";
 import Settings from "./Settings";
 
 let patches: (() => void)[] = [];
-let lastSentGuild: string | null = null;
+let detected: string[] = [];
 
-function getCurrentUser() {
-    return metro.findByProps("getCurrentUser")?.getCurrentUser?.();
-}
+function scanComponent(name: string, component: any) {
+    if (!component) return;
 
-function handleMessage(event: any) {
-    const message = event?.message;
+    try {
+        const original = component;
 
-    if (!message?.guild_id) return;
+        if (typeof original !== "function") return;
 
-    const user = getCurrentUser();
+        const wrapped = function (...args: any[]) {
+            try {
+                const props = args[0];
 
-    if (!user || message.author?.id !== user.id) return;
+                if (
+                    props &&
+                    (
+                        props.guildId ||
+                        props.guildID ||
+                        props.serverId ||
+                        props.guild ||
+                        props.channel
+                    )
+                ) {
+                    if (!detected.includes(name)) {
+                        detected.push(name);
+                        logger.log(
+                            `Latest Used Servers: detected ${name}`
+                        );
+                    }
+                }
+            } catch {}
 
-    lastSentGuild = message.guild_id;
+            return original.apply(this, args);
+        };
 
-    logger.log(
-        `Latest Used Servers: moving ${lastSentGuild} to first slot`
-    );
+        return wrapped;
+    } catch {}
 }
 
 export default {
     onLoad() {
-        logger.log("Latest Used Servers loaded");
+        logger.log(
+            "Latest Used Servers: component scanner loaded"
+        );
 
         try {
-            const dispatcher = metro.findByProps(
-                "dispatch",
-                "subscribe"
-            );
+            const candidates = metro.findAll(
+                (module: any) => {
+                    if (!module) return false;
 
-            if (dispatcher) {
-                dispatcher.subscribe(
-                    "MESSAGE_CREATE",
-                    handleMessage
-                );
+                    const name =
+                        module?.default?.displayName ??
+                        module?.displayName ??
+                        "";
 
-                patches.push(() => {
-                    dispatcher.unsubscribe(
-                        "MESSAGE_CREATE",
-                        handleMessage
+                    return /guild|server|folder|channel/i.test(
+                        String(name)
                     );
-                });
-            }
-
-            /*
-             * Find the guild-list UI component.
-             *
-             * We don't modify Discord's guild store.
-             * Instead, when the list receives its guild props,
-             * put the most recently messaged guild first.
-             */
-            const GuildList =
-                findByName("GuildList", false) ??
-                findByName("Guilds", false);
-
-            if (!GuildList) {
-                logger.error(
-                    "Latest Used Servers: GuildList component not found"
-                );
-                return;
-            }
-
-            const patch = patcher.after(
-                GuildList,
-                "default",
-                (_args: any[], result: any) => {
-                    if (!lastSentGuild) return result;
-
-                    return result;
                 }
             );
 
-            if (patch) patches.push(patch);
+            logger.log(
+                `Latest Used Servers: ${candidates.length} possible components`
+            );
+
+            for (const module of candidates) {
+                const component =
+                    module?.default ?? module;
+
+                const name =
+                    component?.displayName ??
+                    component?.name ??
+                    "Unknown";
+
+                if (
+                    typeof component === "function" &&
+                    !detected.includes(String(name))
+                ) {
+                    detected.push(String(name));
+                }
+            }
 
             logger.log(
-                "Latest Used Servers: UI patch installed"
+                `Latest Used Servers candidates: ${detected.join(", ")}`
             );
         } catch (e) {
             logger.error(
@@ -90,15 +99,14 @@ export default {
     },
 
     onUnload() {
-        for (const unpatch of patches) {
+        patches.forEach((unpatch) => {
             try {
                 unpatch();
             } catch {}
-        }
+        });
 
         patches = [];
-
-        logger.log("Latest Used Servers unloaded");
+        detected = [];
     },
 
     settings: Settings,
