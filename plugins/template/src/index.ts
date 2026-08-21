@@ -2,11 +2,11 @@ import { logger } from "@vendetta";
 import Settings from "./Settings";
 
 export default {
-    onLoad: () => {
+    onLoad() {
         logger.log("Latest Used Servers loaded");
     },
 
-    onUnload: () => {
+    onUnload() {
         logger.log("Latest Used Servers unloaded");
     },
 
