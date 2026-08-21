@@ -3,35 +3,6 @@ import Settings from "./Settings";
 
 let unsubscribe: (() => void) | null = null;
 
-function moveGuildToTop(guildId: string) {
-    try {
-        const GuildActions = metro.findByProps(
-            "moveGuild",
-            "moveGuildToPosition"
-        );
-
-        if (GuildActions?.moveGuildToPosition) {
-            GuildActions.moveGuildToPosition(guildId, 0);
-            logger.log(`Latest Used Servers: moved ${guildId} to top`);
-            return;
-        }
-
-        if (GuildActions?.moveGuild) {
-            GuildActions.moveGuild(guildId, 0);
-            logger.log(`Latest Used Servers: moved ${guildId} to top`);
-            return;
-        }
-
-        logger.error(
-            "Latest Used Servers: native guild reorder function not found"
-        );
-    } catch (e) {
-        logger.error(
-            `Latest Used Servers: ${String(e)}`
-        );
-    }
-}
-
 export default {
     onLoad: () => {
         logger.log("Latest Used Servers loaded");
@@ -63,12 +34,15 @@ export default {
 
                 if (!currentUser) return;
 
-                // Only messages YOU send.
                 if (message.author?.id !== currentUser.id) {
                     return;
                 }
 
-                moveGuildToTop(message.guild_id);
+                logger.log(
+                    `Latest Used Servers: sent message in ${message.guild_id}`
+                );
+
+                // Native guild-reorder discovery comes next.
             };
 
             Dispatcher.subscribe(
@@ -101,9 +75,7 @@ export default {
             unsubscribe = null;
         }
 
-        logger.log(
-            "Latest Used Servers unloaded"
-        );
+        logger.log("Latest Used Servers unloaded");
     },
 
     settings: Settings,
