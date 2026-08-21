@@ -5,7 +5,7 @@ let unsubscribe: (() => void) | null = null;
 
 export default {
     onLoad: () => {
-        logger.log("Latest Used Servers loaded");
+        logger.log("Latest Used Servers scanner loaded");
 
         try {
             const Dispatcher = metro.findByProps(
@@ -13,75 +13,67 @@ export default {
                 "subscribe"
             );
 
-            const UserStore = metro.findByProps(
-                "getCurrentUser"
-            );
-
-            // Search loaded modules for likely guild-order functions.
-            const candidates = metro.findAll((m: any) => {
-                if (!m || typeof m !== "object") return false;
-
-                return Object.keys(m).some((key) =>
-                    /guild.*(move|position|order|reorder)|move.*guild/i.test(key)
-                );
-            });
-
-            logger.log(
-                `Latest Used Servers: found ${candidates.length} reorder candidates`
-            );
-
-            for (const module of candidates) {
-                const names = Object.keys(module).filter((key) =>
-                    /guild.*(move|position|order|reorder)|move.*guild/i.test(key)
-                );
-
-                if (names.length) {
-                    logger.log(
-                        `Latest Used Servers candidate: ${names.join(", ")}`
-                    );
-                }
-            }
-
-            if (!Dispatcher || !UserStore) {
-                logger.error(
-                    "Latest Used Servers: required modules not found"
-                );
+            if (!Dispatcher) {
+                logger.error("Latest Used Servers: dispatcher not found");
                 return;
             }
 
             const handler = (event: any) => {
-                const message = event?.message;
-
-                if (!message?.guild_id) return;
-
-                const currentUser =
-                    UserStore.getCurrentUser?.();
-
-                if (!currentUser) return;
-
-                if (message.author?.id !== currentUser.id) return;
-
-                logger.log(
-                    `Latest Used Servers: sent message in ${message.guild_id}`
-                );
-            };
-
-            Dispatcher.subscribe(
-                "MESSAGE_CREATE",
-                handler
-            );
-
-            unsubscribe = () => {
                 try {
-                    Dispatcher.unsubscribe(
-                        "MESSAGE_CREATE",
-                        handler
+                    if (!event || !event.type) return;
+
+                    const interesting =
+                        /guild|server|position|folder|move|order/i.test(
+                            String(event.type)
+                        );
+
+                    if (!interesting) return;
+
+                    storage.lastGuildAction = String(event.type);
+
+                    try {
+                        storage.lastGuildPayload = JSON.stringify(
+                            event,
+                            null,
+                            2
+                        ).slice(0, 4000);
+                    } catch {
+                        storage.lastGuildPayload = String(event);
+                    }
+
+                    logger.log(
+                        `Latest Used Servers detected: ${event.type}`
                     );
                 } catch {}
             };
+
+            // Listen to likely guild-reordering related dispatcher events.
+            const events = [
+                "GUILD_UPDATE",
+                "GUILD_ORDER_UPDATE",
+                "GUILD_POSITIONS_UPDATE",
+                "GUILD_FOLDER_UPDATE",
+                "USER_SETTINGS_UPDATE",
+            ];
+
+            for (const event of events) {
+                try {
+                    Dispatcher.subscribe(event, handler);
+                } catch {}
+            }
+
+            unsubscribe = () => {
+                for (const event of events) {
+                    try {
+                        Dispatcher.unsubscribe(event, handler);
+                    } catch {}
+                }
+            };
+
+            logger.log("Latest Used Servers scanner active");
         } catch (e) {
             logger.error(
-                `Latest Used Servers: ${String(e)}`
+                `Latest Used Servers scanner: ${String(e)}`
             );
         }
     },
