@@ -4,6 +4,6 @@ const { FormText } = Forms;
 
 export default () => (
     <FormText>
-        Latest Used Servers
+        Latest Used Servers Settings
     </FormText>
 );
