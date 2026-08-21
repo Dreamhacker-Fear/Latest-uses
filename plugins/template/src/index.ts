@@ -1,29 +1,37 @@
-import { metro, patcher, logger } from "@vendetta";
-import { storage } from "@vendetta/plugin";
+import { metro, logger } from "@vendetta";
 import Settings from "./Settings";
 
-let patches: (() => void)[] = [];
+let unsubscribe: (() => void) | null = null;
 
 function moveGuildToTop(guildId: string) {
     try {
-        const actions = metro.findByProps(
-            "moveGuild",
-            "moveGuildToPosition"
+        const GuildActions = metro.findByProps("requestMembers");
+        const UserSettingsStore = metro.findByProps("guildPositions");
+
+        if (!GuildActions?.move) {
+            logger.error("Latest Used Servers: GuildActions.move not found");
+            return;
+        }
+
+        const positions = UserSettingsStore?.guildPositions;
+
+        if (!Array.isArray(positions)) {
+            logger.error("Latest Used Servers: guildPositions not found");
+            return;
+        }
+
+        const currentIndex = positions.indexOf(guildId);
+
+        if (currentIndex <= 0) {
+            return;
+        }
+
+        // Discord's native guild reorder operation.
+        GuildActions.move(currentIndex, 0);
+
+        logger.log(
+            `Latest Used Servers: moved ${guildId} from ${currentIndex} to 0`
         );
-
-        if (actions?.moveGuildToPosition) {
-            actions.moveGuildToPosition(guildId, 0);
-            logger.log(`Moved guild ${guildId} to top`);
-            return;
-        }
-
-        if (actions?.moveGuild) {
-            actions.moveGuild(guildId, 0);
-            logger.log(`Moved guild ${guildId} to top`);
-            return;
-        }
-
-        logger.log("Latest Used Servers: native reorder action not found");
     } catch (e) {
         logger.error(`Latest Used Servers: ${String(e)}`);
     }
@@ -34,72 +42,182 @@ export default {
         logger.log("Latest Used Servers loaded");
 
         try {
-            /*
-             * Discord dispatches this when the current user sends
-             * a message. We only react to messages authored by us.
-             */
             const Dispatcher = metro.findByProps(
                 "dispatch",
                 "subscribe"
             );
 
-            if (!Dispatcher) {
-                logger.error("Latest Used Servers: dispatcher not found");
+            const UserStore = metro.findByProps(
+                "getCurrentUser"
+            );
+
+            if (!Dispatcher || !UserStore) {
+                logger.error(
+                    "Latest Used Servers: required modules not found"
+                );
                 return;
             }
 
             const handler = (event: any) => {
-                if (!event) return;
+                const message = event?.message;
 
-                const authorId =
-                    event.message?.author?.id ??
-                    event.author?.id;
-
-                const currentUser =
-                    metro.findByProps("getCurrentUser")?.getCurrentUser?.();
-
-                if (!currentUser || authorId !== currentUser.id) {
+                if (!message?.guild_id) {
                     return;
                 }
 
-                const guildId =
-                    event.message?.guild_id ??
-                    event.guildId;
+                const currentUser = UserStore.getCurrentUser?.();
 
-                if (!guildId) return;
+                if (!currentUser) {
+                    return;
+                }
 
-                storage.recentServers = [
-                    guildId,
-                    ...(storage.recentServers ?? []).filter(
-                        (id: string) => id !== guildId
-                    ),
-                ].slice(0, 100);
+                // Only react to messages YOU sent.
+                if (message.author?.id !== currentUser.id) {
+                    return;
+                }
 
-                moveGuildToTop(guildId);
+                moveGuildToTop(message.guild_id);
             };
 
             Dispatcher.subscribe("MESSAGE_CREATE", handler);
 
-            patches.push(() => {
+            unsubscribe = () => {
                 try {
-                    Dispatcher.unsubscribe("MESSAGE_CREATE", handler);
+                    Dispatcher.unsubscribe(
+                        "MESSAGE_CREATE",
+                        handler
+                    );
                 } catch {}
-            });
+            };
 
-            logger.log("Latest Used Servers: message tracking enabled");
+            logger.log(
+                "Latest Used Servers: watching sent messages"
+            );
         } catch (e) {
-            logger.error(`Latest Used Servers: ${String(e)}`);
+            logger.error(
+                `Latest Used Servers: ${String(e)}`
+            );
         }
     },
 
     onUnload: () => {
-        for (const unpatch of patches) {
-            try {
-                unpatch();
-            } catch {}
+        if (unsubscribe) {
+            unsubscribe();
+            unsubscribe = null;
         }
 
-        patches = [];
+        logger.log("Latest Used Servers unloaded");
+    },
+
+    settings: Settings,
+};import { metro, logger } from "@vendetta";
+import Settings from "./Settings";
+
+let unsubscribe: (() => void) | null = null;
+
+function moveGuildToTop(guildId: string) {
+    try {
+        const GuildActions = metro.findByProps("requestMembers");
+        const UserSettingsStore = metro.findByProps("guildPositions");
+
+        if (!GuildActions?.move) {
+            logger.error("Latest Used Servers: GuildActions.move not found");
+            return;
+        }
+
+        const positions = UserSettingsStore?.guildPositions;
+
+        if (!Array.isArray(positions)) {
+            logger.error("Latest Used Servers: guildPositions not found");
+            return;
+        }
+
+        const currentIndex = positions.indexOf(guildId);
+
+        if (currentIndex <= 0) {
+            return;
+        }
+
+        // Discord's native guild reorder operation.
+        GuildActions.move(currentIndex, 0);
+
+        logger.log(
+            `Latest Used Servers: moved ${guildId} from ${currentIndex} to 0`
+        );
+    } catch (e) {
+        logger.error(`Latest Used Servers: ${String(e)}`);
+    }
+}
+
+export default {
+    onLoad: () => {
+        logger.log("Latest Used Servers loaded");
+
+        try {
+            const Dispatcher = metro.findByProps(
+                "dispatch",
+                "subscribe"
+            );
+
+            const UserStore = metro.findByProps(
+                "getCurrentUser"
+            );
+
+            if (!Dispatcher || !UserStore) {
+                logger.error(
+                    "Latest Used Servers: required modules not found"
+                );
+                return;
+            }
+
+            const handler = (event: any) => {
+                const message = event?.message;
+
+                if (!message?.guild_id) {
+                    return;
+                }
+
+                const currentUser = UserStore.getCurrentUser?.();
+
+                if (!currentUser) {
+                    return;
+                }
+
+                // Only react to messages YOU sent.
+                if (message.author?.id !== currentUser.id) {
+                    return;
+                }
+
+                moveGuildToTop(message.guild_id);
+            };
+
+            Dispatcher.subscribe("MESSAGE_CREATE", handler);
+
+            unsubscribe = () => {
+                try {
+                    Dispatcher.unsubscribe(
+                        "MESSAGE_CREATE",
+                        handler
+                    );
+                } catch {}
+            };
+
+            logger.log(
+                "Latest Used Servers: watching sent messages"
+            );
+        } catch (e) {
+            logger.error(
+                `Latest Used Servers: ${String(e)}`
+            );
+        }
+    },
+
+    onUnload: () => {
+        if (unsubscribe) {
+            unsubscribe();
+            unsubscribe = null;
+        }
+
         logger.log("Latest Used Servers unloaded");
     },
 
