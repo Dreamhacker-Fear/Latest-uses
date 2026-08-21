@@ -4,6 +4,17 @@ import Settings from "./Settings";
 
 let unpatch: (() => void) | null = null;
 
+function rememberServer(id: string) {
+    if (!id) return;
+
+    const recent = storage.recentServers ?? [];
+
+    storage.recentServers = [
+        id,
+        ...recent.filter((x: string) => x !== id),
+    ].slice(0, 100);
+}
+
 export default {
     onLoad: () => {
         logger.log("Latest Used Servers loaded");
@@ -14,24 +25,17 @@ export default {
             );
 
             if (!NavigationStore) {
-                logger.error("Latest Used Servers: navigation module not found");
+                logger.error("Latest Used Servers: navigation store not found");
                 return;
             }
-
-            const original = NavigationStore.getLastSelectedGuildId;
 
             unpatch = patcher.after(
                 NavigationStore,
                 "getLastSelectedGuildId",
                 (_args, result) => {
-                    if (!result) return result;
-
-                    const recent = storage.recentServers ?? [];
-
-                    storage.recentServers = [
-                        result,
-                        ...recent.filter((id: string) => id !== result),
-                    ].slice(0, 100);
+                    if (result) {
+                        rememberServer(result);
+                    }
 
                     return result;
                 }
